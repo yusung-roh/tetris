@@ -1,0 +1,414 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <title>모바일 지원 테트리스 (다음 블록 미리 보기)</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      text-align: center;
+      font-family: sans-serif;
+      background: #f0f0f0;
+    }
+    h1 {
+      margin-top: 20px;
+    }
+    #container {
+      display: flex;
+      justify-content: center;
+      align-items: flex-start;
+      margin-top: 10px;
+      flex-wrap: wrap; /* 모바일에서 적절히 배치가 잘 되도록 */
+    }
+    #gameCanvas {
+      background: #ddd;
+      border: 2px solid #333;
+      margin-right: 20px;
+      margin-bottom: 10px;
+    }
+    #nextCanvas {
+      background: #ddd;
+      border: 2px solid #333;
+      margin-bottom: 10px;
+    }
+    #info {
+      margin-top: 10px;
+    }
+    /* 모바일용 조작 버튼 컨테이너 */
+    #controls {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 10px;
+      margin-top: 10px;
+      flex-wrap: wrap;
+    }
+    /* 버튼 기본 스타일 */
+    #controls button {
+      width: 60px;
+      height: 60px;
+      font-size: 24px;
+      border: 1px solid #333;
+      border-radius: 8px;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+  <h1>테트리스</h1>
+  <div id="container">
+    <!-- 메인 테트리스 보드 -->
+    <canvas id="gameCanvas" width="240" height="480"></canvas>
+    <!-- 다음 블록 표시용 캔버스 -->
+    <canvas id="nextCanvas" width="120" height="120"></canvas>
+  </div>
+
+  <div id="info">
+    <p>조작키: 화살표 키 (←,→,↓), 회전: ↑, 즉시 낙하: 스페이스바</p>
+    <p>모바일용 터치 버튼을 아래에 추가했습니다.</p>
+  </div>
+
+  <!-- 모바일/터치용 조작 버튼 -->
+  <div id="controls">
+    <button id="leftButton">←</button>
+    <button id="rotateButton">↻</button>
+    <button id="rightButton">→</button>
+    <button id="downButton">↓</button>
+    <button id="dropButton">Drop</button>
+  </div>
+
+  <script>
+    // ====== 기본 설정 ======
+    const canvas = document.getElementById("gameCanvas");
+    const ctx = canvas.getContext("2d");
+    const rows = 20;
+    const cols = 10;
+    const blockSize = 24;
+
+    // 미리보기 캔버스
+    const nextCanvas = document.getElementById("nextCanvas");
+    const nextCtx = nextCanvas.getContext("2d");
+
+    // 보드(2차원 배열) - 값이 0이면 빈 칸
+    let board = Array.from({ length: rows }, () => Array(cols).fill(0));
+
+    // 테트리스 블록 모양(각각 4가지 회전 상태)
+    const SHAPES = {
+      I: [
+        [ [0,0], [0,1], [0,2], [0,3] ],
+        [ [0,2], [1,2], [2,2], [3,2] ],
+        [ [3,0], [3,1], [3,2], [3,3] ],
+        [ [0,1], [1,1], [2,1], [3,1] ],
+      ],
+      J: [
+        [ [0,0], [1,0], [1,1], [1,2] ],
+        [ [0,1], [0,2], [1,1], [2,1] ],
+        [ [0,0], [0,1], [0,2], [1,2] ],
+        [ [0,1], [1,1], [2,1], [2,0] ],
+      ],
+      L: [
+        [ [0,2], [1,0], [1,1], [1,2] ],
+        [ [0,1], [1,1], [2,1], [2,2] ],
+        [ [0,0], [0,1], [0,2], [1,0] ],
+        [ [0,0], [0,1], [1,1], [2,1] ],
+      ],
+      O: [
+        [ [0,0], [0,1], [1,0], [1,1] ],
+        [ [0,0], [0,1], [1,0], [1,1] ],
+        [ [0,0], [0,1], [1,0], [1,1] ],
+        [ [0,0], [0,1], [1,0], [1,1] ],
+      ],
+      S: [
+        [ [0,1], [0,2], [1,0], [1,1] ],
+        [ [0,0], [1,0], [1,1], [2,1] ],
+        [ [1,1], [1,2], [2,0], [2,1] ],
+        [ [0,0], [1,0], [1,1], [2,1] ],
+      ],
+      T: [
+        [ [0,1], [1,0], [1,1], [1,2] ],
+        [ [0,1], [1,1], [2,1], [1,2] ],
+        [ [1,0], [1,1], [1,2], [2,1] ],
+        [ [1,0], [0,1], [1,1], [2,1] ],
+      ],
+      Z: [
+        [ [0,0], [0,1], [1,1], [1,2] ],
+        [ [0,1], [1,1], [1,0], [2,0] ],
+        [ [1,0], [1,1], [2,1], [2,2] ],
+        [ [0,2], [1,1], [1,2], [2,1] ],
+      ],
+    };
+
+    // 블록별 색깔
+    const COLORS = {
+      I: "cyan",
+      J: "blue",
+      L: "orange",
+      O: "yellow",
+      S: "green",
+      T: "purple",
+      Z: "red"
+    };
+
+    // 현재 조작 중인 블록
+    let currentPiece = null;
+    let currentX = 0;
+    let currentY = 0;
+    let currentRotation = 0;
+
+    // "다음에 나올 블록" 관리
+    let nextPiece = null;
+
+    // 드롭 간격과 시간
+    let dropInterval = 800; // ms
+    let lastDropTime = 0;
+
+    let gameOver = false;
+
+    // ====== 블록 관련 함수 ======
+
+    // 랜덤 블록 뽑기
+    function getRandomPiece() {
+      const keys = Object.keys(SHAPES);
+      return keys[Math.floor(Math.random() * keys.length)];
+    }
+
+    // 새 블록 세팅
+    function newPiece() {
+      // 기존 nextPiece를 현재 블록으로 가져옴
+      currentPiece = nextPiece;
+      currentRotation = 0;
+      currentX = Math.floor(cols / 2) - 2;
+      currentY = 0;
+
+      // 새로 "다음 블록" 결정
+      nextPiece = getRandomPiece();
+
+      // 새 블록이 시작부터 충돌이면 게임 오버
+      if (collision(currentX, currentY, currentRotation)) {
+        gameOver = true;
+      }
+    }
+
+    // 충돌 체크
+    function collision(x, y, rotation) {
+      const shape = SHAPES[currentPiece][rotation];
+      for (let i = 0; i < shape.length; i++) {
+        const [row, col] = shape[i];
+        let boardX = x + col;
+        let boardY = y + row;
+
+        // 벽을 벗어나거나 이미 차있으면 충돌
+        if (
+          boardX < 0 ||
+          boardX >= cols ||
+          boardY < 0 ||
+          boardY >= rows ||
+          board[boardY][boardX] !== 0
+        ) {
+          return true;
+        }
+      }
+      return false;
+    }
+
+    // 블록을 보드에 고정
+    function lockPiece() {
+      const shape = SHAPES[currentPiece][currentRotation];
+      for (let i = 0; i < shape.length; i++) {
+        const [row, col] = shape[i];
+        board[currentY + row][currentX + col] = currentPiece;
+      }
+    }
+
+    // 가득 찬 줄 삭제
+    function clearLines() {
+      for (let r = rows - 1; r >= 0; r--) {
+        if (board[r].every(cell => cell !== 0)) {
+          board.splice(r, 1); // 해당 줄 제거
+          board.unshift(Array(cols).fill(0)); // 맨 위 새 줄 추가
+          r++;
+        }
+      }
+    }
+
+    // ====== 그리기 함수 ======
+
+    // 전체 보드(이미 고정된 블록들) + 현재 블록
+    function drawBoard() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      // 고정된 블록들
+      for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < cols; c++) {
+          if (board[r][c] !== 0) {
+            ctx.fillStyle = COLORS[board[r][c]];
+            ctx.fillRect(c * blockSize, r * blockSize, blockSize, blockSize);
+            ctx.strokeRect(c * blockSize, r * blockSize, blockSize, blockSize);
+          }
+        }
+      }
+
+      // 현재 조작 블록
+      if (currentPiece && !gameOver) {
+        const shape = SHAPES[currentPiece][currentRotation];
+        ctx.fillStyle = COLORS[currentPiece];
+        for (let i = 0; i < shape.length; i++) {
+          const [row, col] = shape[i];
+          const drawX = (currentX + col) * blockSize;
+          const drawY = (currentY + row) * blockSize;
+          ctx.fillRect(drawX, drawY, blockSize, blockSize);
+          ctx.strokeRect(drawX, drawY, blockSize, blockSize);
+        }
+      }
+    }
+
+    // 다음 블록 미리보기
+    function drawNextPiece() {
+      nextCtx.clearRect(0, 0, nextCanvas.width, nextCanvas.height);
+
+      if (!nextPiece) return;
+      const shape = SHAPES[nextPiece][0];
+      nextCtx.fillStyle = COLORS[nextPiece];
+      // 가운데쯤 보이도록 위치 조정
+      shape.forEach(([row, col]) => {
+        const px = (col + 1) * blockSize;
+        const py = (row + 1) * blockSize;
+        nextCtx.fillRect(px, py, blockSize, blockSize);
+        nextCtx.strokeRect(px, py, blockSize, blockSize);
+      });
+    }
+
+    // ====== 게임 루프 ======
+    function update(timestamp) {
+      if (gameOver) {
+        drawBoard();
+        ctx.fillStyle = "black";
+        ctx.font = "18px sans-serif";
+        ctx.fillText("게임 오버!", canvas.width / 2 - 40, canvas.height / 2);
+        return;
+      }
+
+      if (!lastDropTime) {
+        lastDropTime = timestamp;
+      }
+      const delta = timestamp - lastDropTime;
+
+      if (delta > dropInterval) {
+        moveDown();
+        lastDropTime = timestamp;
+      }
+
+      drawBoard();
+      drawNextPiece();
+      requestAnimationFrame(update);
+    }
+
+    // 블록 한 칸 아래로 이동
+    function moveDown() {
+      if (!collision(currentX, currentY + 1, currentRotation)) {
+        currentY++;
+      } else {
+        // 더 이상 내려갈 수 없으면 고정
+        lockPiece();
+        clearLines();
+        newPiece();
+      }
+    }
+
+    // ====== 모바일/터치용 조작 함수 ======
+    function moveLeft() {
+      if (!collision(currentX - 1, currentY, currentRotation)) {
+        currentX--;
+        drawBoard();
+        drawNextPiece();
+      }
+    }
+
+    function moveRight() {
+      if (!collision(currentX + 1, currentY, currentRotation)) {
+        currentX++;
+        drawBoard();
+        drawNextPiece();
+      }
+    }
+
+    function rotatePiece() {
+      const newRotation = (currentRotation + 1) % 4;
+      if (!collision(currentX, currentY, newRotation)) {
+        currentRotation = newRotation;
+        drawBoard();
+        drawNextPiece();
+      }
+    }
+
+    function moveDownOne() {
+      if (!collision(currentX, currentY + 1, currentRotation)) {
+        currentY++;
+        drawBoard();
+        drawNextPiece();
+      }
+    }
+
+    function hardDrop() {
+      while (!collision(currentX, currentY + 1, currentRotation)) {
+        currentY++;
+      }
+      moveDown();
+      drawBoard();
+      drawNextPiece();
+    }
+
+    // ====== 키보드 이벤트 ======
+    document.addEventListener("keydown", e => {
+      if (gameOver) return;
+      switch (e.key) {
+        case "ArrowLeft":
+          moveLeft();
+          break;
+        case "ArrowRight":
+          moveRight();
+          break;
+        case "ArrowDown":
+          moveDownOne();
+          break;
+        case "ArrowUp":
+          rotatePiece();
+          break;
+        case " ":
+          hardDrop();
+          break;
+      }
+    });
+
+    // ====== 터치 버튼 이벤트 ======
+    const leftButton = document.getElementById("leftButton");
+    const rotateButton = document.getElementById("rotateButton");
+    const rightButton = document.getElementById("rightButton");
+    const downButton = document.getElementById("downButton");
+    const dropButton = document.getElementById("dropButton");
+
+    leftButton.addEventListener("click", () => {
+      if (!gameOver) moveLeft();
+    });
+    rotateButton.addEventListener("click", () => {
+      if (!gameOver) rotatePiece();
+    });
+    rightButton.addEventListener("click", () => {
+      if (!gameOver) moveRight();
+    });
+    downButton.addEventListener("click", () => {
+      if (!gameOver) moveDownOne();
+    });
+    dropButton.addEventListener("click", () => {
+      if (!gameOver) hardDrop();
+    });
+
+    // ====== 게임 시작 초기화 ======
+    // nextPiece를 먼저 정하고, 그걸 사용해 currentPiece를 세팅
+    nextPiece = getRandomPiece();
+    newPiece();
+    requestAnimationFrame(update);
+  </script>
+</body>
+</html>
